@@ -9,6 +9,7 @@ pub mod fake_metadata {
     pub fn create_metadata(ctx: Context<CreateMetadata>) -> Result<()> {
         let metadata = &mut ctx.accounts.metadata;
 
+        metadata.character = ctx.accounts.character.key();
         metadata.health = u8::MAX;
         metadata.power = u8::MAX;
 
@@ -18,12 +19,12 @@ pub mod fake_metadata {
 
 #[derive(Accounts)]
 pub struct CreateMetadata<'info> {
-    /// CHECK: manual checks
+    /// CHECK: character passed manually
     pub character: AccountInfo<'info>,
     #[account(
         init,
         payer = authority,
-        space = 8 + 32 + 8 + 8,
+        space = 8 + 32 + 1 + 1,
         seeds = [character.key().as_ref()],
         bump
     )]

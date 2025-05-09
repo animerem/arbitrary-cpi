@@ -8,9 +8,12 @@ pub mod character_metadata {
 
     pub fn create_metadata(ctx: Context<CreateMetadata>) -> Result<()> {
         let metadata = &mut ctx.accounts.metadata;
-        let random_health = pseudo_random(Clock::get()?, 20);
-        let random_power = pseudo_random(Clock::get()?, 20);
+        let clock = Clock::get()?;
 
+        let random_health = pseudo_random(clock, 20);
+        let random_power = pseudo_random(clock, 20);
+
+        metadata.character = ctx.accounts.character.key();
         metadata.health = random_health;
         metadata.power = random_power;
 
@@ -20,12 +23,12 @@ pub mod character_metadata {
 
 #[derive(Accounts)]
 pub struct CreateMetadata<'info> {
-    /// CHECK: manual checks
+    /// CHECK: character passed manually
     pub character: AccountInfo<'info>,
     #[account(
         init,
         payer = authority,
-        space = 8 + 32 + 8 + 8,
+        space = 8 + 32 + 1 + 1, // correct sizing: Pubkey + u8 + u8
         seeds = [character.key().as_ref()],
         bump
     )]
@@ -43,8 +46,6 @@ pub struct Metadata {
 }
 
 fn pseudo_random(clock: Clock, limit: u8) -> u8 {
-    let big_limit = limit as i64;
-    let random = clock.unix_timestamp.checked_rem(big_limit).unwrap();
-
-    random as u8
+    let seed = clock.unix_timestamp.unsigned_abs(); // Prevent negative remainders
+    (seed % limit as u64) as u8
 }

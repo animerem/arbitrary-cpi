@@ -6,8 +6,7 @@ declare_id!("AbFFYMjsZ2iaXn6wU9C8BDDJS8yP3bE9tEndB56cn3yE");
 
 #[program]
 pub mod gameplay {
-    use anchor_lang::solana_program::{instruction::Instruction, program::invoke};
-
+    use anchor_lang::solana_program::{instruction::Instruction, program::invoke_signed};
     use super::*;
 
     pub fn create_character_insecure(ctx: Context<CreateCharacterInsecure>) -> Result<()> {
@@ -16,46 +15,41 @@ pub mod gameplay {
         character.auth = ctx.accounts.authority.key();
         character.wins = 0;
 
-        let context = CpiContext::new(
-            ctx.accounts.metadata_program.to_account_info(),
-            CreateMetadata {
-                character: ctx.accounts.character.to_account_info(),
-                metadata: ctx.accounts.metadata_account.to_owned(),
-                authority: ctx.accounts.authority.to_account_info(),
-                system_program: ctx.accounts.system_program.to_account_info(),
-            },
-        );
+        let signer_seeds = &[ctx.accounts.authority.key().as_ref(), &[ctx.bumps["character"]]];
 
-        let create_metadata_instruction = Instruction {
-            program_id: context.program.key(),
+        let create_metadata_ix = Instruction {
+            program_id: ctx.accounts.metadata_program.key(),
             accounts: vec![
                 AccountMeta::new_readonly(ctx.accounts.character.key(), false),
                 AccountMeta::new(ctx.accounts.metadata_account.key(), false),
                 AccountMeta::new(ctx.accounts.authority.key(), true),
                 AccountMeta::new_readonly(ctx.accounts.system_program.key(), false),
             ],
-            data: anchor_sighash("create_metadata").into(),
+            data: anchor_sighash("create_metadata").to_vec(),
         };
 
-        invoke(
-            &create_metadata_instruction,
-            &context.accounts.to_account_infos(),
+        invoke_signed(
+            &create_metadata_ix,
+            &[
+                ctx.accounts.character.to_account_info(),
+                ctx.accounts.metadata_account.clone(),
+                ctx.accounts.authority.to_account_info(),
+                ctx.accounts.system_program.to_account_info(),
+            ],
+            &[signer_seeds],
         )?;
 
         Ok(())
     }
 
     pub fn battle_insecure(ctx: Context<BattleInsecure>) -> Result<()> {
-        let player_one_meta_data = &ctx.accounts.player_one_metadata.try_borrow_data()?;
-        let player_one_meta = Metadata::try_from_slice(player_one_meta_data)?;
+        let player_one_meta = Metadata::try_from_slice(&ctx.accounts.player_one_metadata.try_borrow_data()?)?;
+        let player_two_meta = Metadata::try_from_slice(&ctx.accounts.player_two_metadata.try_borrow_data()?)?;
 
-        let player_two_meta_data = &ctx.accounts.player_two_metadata.try_borrow_data()?;
-        let player_two_meta = Metadata::try_from_slice(player_two_meta_data)?;
+        let p1_health = player_one_meta.health.saturating_sub(player_two_meta.power);
+        let p2_health = player_two_meta.health.saturating_sub(player_one_meta.power);
 
-        let player_one_health = player_one_meta.health - player_two_meta.power;
-        let player_two_health = player_two_meta.health - player_one_meta.power;
-
-        if player_one_health > player_two_health {
+        if p1_health > p2_health {
             ctx.accounts.player_one.wins += 1;
         } else {
             ctx.accounts.player_two.wins += 1;
@@ -72,7 +66,7 @@ pub struct CreateCharacterInsecure<'info> {
     #[account(
         init,
         payer = authority,
-        space = 8 + 32 + 32 + 64,
+        space = 8 + 32 + 32 + 8,
         seeds = [authority.key().as_ref()],
         bump
     )]
@@ -81,11 +75,11 @@ pub struct CreateCharacterInsecure<'info> {
         mut,
         seeds = [character.key().as_ref()],
         seeds::program = metadata_program.key(),
-        bump,
+        bump
     )]
-    /// CHECK: manual checks
+    /// CHECK: unchecked for demonstration purposes
     pub metadata_account: AccountInfo<'info>,
-    ///CHECK: intentionally don't check the metadata program
+    /// CHECK: intentionally unchecked
     pub metadata_program: UncheckedAccount<'info>,
     pub system_program: Program<'info, System>,
 }
@@ -94,11 +88,11 @@ pub struct CreateCharacterInsecure<'info> {
 pub struct BattleInsecure<'info> {
     pub player_one: Account<'info, Character>,
     pub player_two: Account<'info, Character>,
-    /// CHECK: manual checks
+    /// CHECK: unchecked metadata
     pub player_one_metadata: UncheckedAccount<'info>,
-    /// CHECK: manual checks
+    /// CHECK: unchecked metadata
     pub player_two_metadata: UncheckedAccount<'info>,
-    /// CHECK: intentionally unchecked
+    /// CHECK: unchecked
     pub metadata_program: UncheckedAccount<'info>,
 }
 
@@ -109,7 +103,7 @@ pub struct Character {
     pub wins: u64,
 }
 
-#[derive(AnchorSerialize, AnchorDeserialize, Clone)]
+#[derive(BorshDeserialize, BorshSerialize, Clone)]
 pub struct Metadata {
     pub character: Pubkey,
     pub health: u8,
@@ -117,11 +111,8 @@ pub struct Metadata {
 }
 
 fn anchor_sighash(name: &str) -> [u8; 8] {
-    let namespace = "global";
-    let preimage = format!("{}:{}", namespace, name);
+    let preimage = format!("global:{}", name);
     let mut sighash = [0u8; 8];
-    sighash.copy_from_slice(
-        &anchor_lang::solana_program::hash::hash(preimage.as_bytes()).to_bytes()[..8],
-    );
+    sighash.copy_from_slice(&anchor_lang::solana_program::hash::hash(preimage.as_bytes()).to_bytes()[..8]);
     sighash
 }
